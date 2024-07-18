@@ -1,0 +1,220 @@
+# Description ============================================================================================ #
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Default template deployment settings
+# Parameter ===============================================================================================  #
+Parameters:
+  myServer:
+    Type: String
+    Default: my-server-1
+    Description: Name of my server
+  KeyName:
+    Type: String
+    Default: clef-jenkins
+    Description: my SSH Key
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: type of instance
+# Resource ===============================================================================================  #
+Resources:
+  myEIP0:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  myEIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  AssociateEIP0:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt 'myEIP0.AllocationId'
+      NetworkInterfaceId: !Ref Eth0
+  AssociateEIP1:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt 'myEIP1.AllocationId'
+      NetworkInterfaceId: !Ref Eth1
+  Eth0:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: interface eth0
+      GroupSet:
+      - !Ref InstanceSecurityGroup
+    #  PrivateIpAddress: !Ref 'PrivIp0'
+      SourceDestCheck: 'false'
+      SubnetId: !Ref PublicSubnet
+  Eth1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: interface eth1
+      GroupSet:
+      - !Ref InstanceSecurityGroup
+    #  PrivateIpAddress: !Ref 'PrivIp0'
+      SourceDestCheck: 'false'
+      SubnetId: !Ref PublicSubnet
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: myVPC
+      GroupDescription: 'myInstance - EC2 instances: HTTP and SSH access'
+      SecurityGroupIngress:
+      - ToPort: '443'
+        FromPort: '443'
+        CidrIp: 0.0.0.0/0
+        IpProtocol: tcp
+      - ToPort: '22'
+        FromPort: '22'
+        CidrIp: 0.0.0.0/0
+        IpProtocol: tcp
+      Tags:
+      - Key: Name
+        Value: mySG
+  myVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - VPC
+        - CIDR
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: myVPC
+      InternetGatewayId:
+        Ref: InternetGateway
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock:
+        Fn::FindInMap:
+        - SubnetConfig
+        - Public
+        - CIDR
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: myVPC
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnet
+      RouteTableId:
+        Ref: PublicRouteTable
+  PublicRoute:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::Route
+    Properties:
+      GatewayId:
+        Ref: InternetGateway
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId:
+        Ref: PublicRouteTable
+  myInstance0:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName:
+        Ref: KeyName
+      ImageId:
+        Fn::FindInMap:
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - AMI
+      InstanceType:
+        Ref: InstanceType
+      NetworkInterfaces:
+      - NetworkInterfaceId: !Ref Eth0
+        DeviceIndex: '0'
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - "\n"
+          - - '#!/bin/bash'
+            - sudo yum update -y
+            - sudo yum upgrade -y
+      Tags:
+      - Value: !Ref myServer
+        Key: Name
+  myInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName:
+        Ref: KeyName
+      ImageId:
+        Fn::FindInMap:
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - AMI
+      InstanceType:
+        Ref: InstanceType
+      NetworkInterfaces:
+      - NetworkInterfaceId: !Ref Eth1
+        DeviceIndex: '0'
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - "\n"
+          - - '#!/bin/bash'
+            - sudo yum update -y
+            - sudo yum upgrade -y
+      Tags:
+      - Value: my-server-1
+        Key: Name
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: myVPC
+      SecurityGroupEgress:
+      - ToPort: '80'
+        FromPort: '80'
+        IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+      GroupDescription: 'Babysteps - ELB: HTTP access'
+      SecurityGroupIngress:
+      - ToPort: '80'
+        FromPort: '80'
+        IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Value: myELBSg
+        Key: Name
+  myLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+      HealthCheck:
+        Interval: '30'
+        Target: HTTP:80/index.html
+        Timeout: '5'
+        UnhealthyThreshold: '5'
+        HealthyThreshold: '3'
+      Subnets:
+      - Ref: PublicSubnet
+      Instances:
+      - Ref: myInstance0
+      - Ref: myInstance1
+      Listeners:
+      - InstancePort: '80'
+        Protocol: HTTP
+        LoadBalancerPort: '80'
+      SecurityGroups:
+      - Ref: ELBSecurityGroup
+# Mappings ===============================================================================================  #
+Mappings:
+  SubnetConfig:
+    Public:
+      CIDR: 10.42.0.0/24
+    VPC:
+      CIDR: 10.42.0.0/16
+  AWSRegionArch2AMI:
+    eu-west-1:
+      AMI: ami-0bb3fad3c0286ebd5

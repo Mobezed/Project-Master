@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "myServer",
+        "ParameterValue": "my-server-2"
+    },
+    {
+        "ParameterKey": "InstanceType",
+        "ParameterValue": "t2.micro"
+    }
+]
